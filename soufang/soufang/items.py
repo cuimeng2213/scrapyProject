@@ -14,9 +14,18 @@ class SoufangItem(scrapy.Item):
     pass
 
 class NewHouseItem(scrapy.Item):
+    province = scrapy.Field()
+    city = scrapy.Field()
     name = scrapy.Field()
-    position = scrapy.Field()
-    resource = scrapy.Field()
-    house_type = scrapy.Field()
-    house_area = scrapy.Field()
-    house_price = scrapy.Field()
+    price = scrapy.Field()
+    #几居室有可能是一个列表
+    rooms = scrapy.Field()
+    area = scrapy.Field()
+    address = scrapy.Field()
+    #行政区
+    district = scrapy.Field()
+    #是否在售
+    sale = scrapy.Field()
+    #详情页面url
+    origin_url = scrapy.Field()
+    

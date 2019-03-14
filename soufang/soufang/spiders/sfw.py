@@ -12,13 +12,41 @@ class SfwSpider(scrapy.Spider):
     def parse(self, response):
         trs = response.xpath("//div[@class='outCont']/table/tr")
         for tr in trs:
-            tds = tr.xpath("./td[not(@class)")
+            tds = tr.xpath("./td[not(@class)]")
             province_td = tds[0]
             province_text = province_td.xpath(".//text()").get()
             province_text = re.sub(r"\s","", province_text)
+            if province_text == "其它":
+                continue
             if province_text:
-                print(province_text)
-'''
+                #print(province_text)
+                #保存省份名字，如果为None则使用前一次保存得
+                province_name = province_text
+            city_td = tds[1]
+            city_links = city_td.xpath(".//a")
+            for city_link in city_links:
+                city = city_link.xpath(".//text()").get()
+                city_url = city_link.xpath("./@href").get()
+                #print("%s %s" % (province_name, city))
+                
+                #拼接二手房和新房url
+                url_model = city_url.split('//')
+                scheme = url_model[0]
+                domain = url_model[1]
+                if "bj." in domain:
+                    newhouse_url = "https://newhouse.fang.com/house/s/"
+                    esf_url = "https://esf.fang.com/"
+                else:
+                    #https://hf.newhouse.fang.com/house/s/
+                    #http://hf.fang.com/
+                    newhouse_url = scheme +"//"+"newhouse."+domain+"house/s/"
+                    #https://hf.esf.fang.com/
+                    esf_url = scheme +"//"+"esf."+domain+"house/s/"
+                yield scrapy.Request(newhouse_url, callback=self.parse_newhouse, meta = {"info":(province_name, city)} )
+
+                yield scrapy.Request(esf_url, callback=self.parse_esf, meta = {"info":(province_name, city)} )
+
+    '''
     def parse(self, response):
         provinces = response.xpath("//div[@class='outCont']/table/tr")[1:]
         for province in provinces:
@@ -48,12 +76,12 @@ class SfwSpider(scrapy.Spider):
                 yield scrapy.Request(esf_url, callback=self.parse_esf)
                 break
             break
-'''
+    '''
     def strip_list_space(self, l):
         return l and l.strip()
             
     def parse_newhouse(self, response):
-        print(response.meta.get("province_name"), response.meta.get("city_name"))
+        province_name, city = response.meta.get("info")
         houses = response.xpath("//div[@class='nl_con clearfix']/ul/li") 
         for house in houses:
             item = NewHouseItem()
