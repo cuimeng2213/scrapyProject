@@ -2,13 +2,15 @@
 import re
 import scrapy
 from urllib.parse import urljoin
-from soufang.items import NewHouseItem
+from soufang.items import NewHouseItem, ESFHouseItem
+from scrapy_redis.spiders import RedisSpider
 
 
 class SfwSpider(scrapy.Spider):
     name = 'sfw'
     allowed_domains = ['lf.fang.com','hf.newhouse.fang.com','newhouse.fang.com','esf.fang.com']
     start_urls = ['https://www.fang.com/SoufunFamily.htm']
+    redis_key = "fang:url"
     def parse(self, response):
         trs = response.xpath("//div[@class='outCont']/table/tr")[1:]
         for tr in trs:
@@ -46,11 +48,11 @@ class SfwSpider(scrapy.Spider):
                     esf_url = "https://{}.esf.fang.com/".format(suoxie)
                     
                 print(">>>>>>>>>>: %s %s" % (newhouse_url, esf_url))
-                yield scrapy.Request(newhouse_url, callback=self.parse_newhouse, meta = {"info":(province_name, city)} )
+                yield scrapy.Request(newhouse_url, callback=self.parse_newhouse_next_page, meta = {"info":(province_name, city)} )
 
-                yield scrapy.Request(esf_url, callback=self.parse_esf, meta = {"info":(province_name, city)} )
-                break
-            break
+                yield scrapy.Request(esf_url, callback=self.parse_esf_next_page, meta = {"info":(province_name, city)} )
+                #break
+            #break
     def parse_newhouse(self, response):
         province_name, city_name = response.meta.get("info")
         print("###############", province_name, city_name)
@@ -69,7 +71,9 @@ class SfwSpider(scrapy.Spider):
             relative_message = li.xpath(".//div[contains(@class,'relative_message')]/div[@class='address']/a/@title").get()
             if relative_message:
                 address = relative_message
-                district = re.search(r".*\[(.*)\].*", relative_message).group(1)
+                district =  re.search(r".*\[(.*)\].*", relative_message)
+                if district:
+                    district = district.group(1)
             sale = li.xpath("//div[contains(@class,'fangyuan')]/span[@class='inSale']/text()").get()
             if sale:
                 sale = sale
@@ -80,90 +84,83 @@ class SfwSpider(scrapy.Spider):
             price = li.xpath(".//div[@class='nhouse_price']//text()").getall()
             if price:
                 price = re.sub(r"\s","", "".join(price))
-            item = NewHouseItem(province= province_name, city=city_name, name=name,price=price,sale=sale,origin_url=origin_url,rooms=house_type,area=area,district=district)
+            item = NewHouseItem(province= province_name, city=city_name, name=name,price=price,sale=sale,origin_url=origin_url,rooms=house_type,area=area,district=district,house_style="newhouse")
             yield item
-            
-        #当请求到第6页页面上有两个符合匹配规则的下一页地址，此处使用最后一个
-        #next_page = response.xpath("//a[@class='next']/@href").getall()
-        #if next_page:
-            #print("###################: netx_page: ", next_page)
-            #yield scrapy.Request(urljoin(response.url, next_page[-1]), callback = self.parse_newhouse)
+    def parse_newhouse_next_page(self, response):
+        '''
+        拼接下一页的请求地址
+            url格式为：/house/s/b9{}/
+        '''
+        province_name, city_name = response.meta.get("info")
+        last_page = response.xpath("//a[@class='last']/text()").get()
+        if last_page:
+            last_page = last_page.strip()
+            if last_page != "尾页":
+                return
+            next_url = response.xpath("//a[@class='last']/@href").get()
+            url_count = re.search(r".*b9(\d+).*", next_url)
+            if not url_count:
+                return
+            url_count = int(url_count.group(1)) + 1
+            for i in range(1, url_count):
+                url = response.urljoin("/house/s/b9{}/".format(i))
+                yield scrapy.Request(url=url, callback=self.parse_newhouse, meta={"info":(province_name, city_name)})
+    def parse_esf_next_page(self, response):
+        province_name, city_name = response.meta.get("info")
+        all_page = response.xpath("//div[@class='page_al']/p[last()]/text()").get()
+        if all_page:
+            count = re.search(r".*共(\d+)页.*", all_page)
+            if not count:
+                return
+            count = int(count.group(1))+1
+            for i in range(1,count):
+                url = response.urljoin("/house/i3{}/".format(i))
+                print("#########: ",url)
+                yield scrapy.Request(url = url, callback=self.parse_esf, meta = {"info":(province_name,city_name)})
 
-
-
-    '''
-    def parse(self, response):
-        provinces = response.xpath("//div[@class='outCont']/table/tr")[1:]
-        for province in provinces:
-            tds = province.xpath("./td")
-            province_name = tds[1].xpath(".//text()").get().strip()
-            if province_name == "其它":
-                continue
-            if province_name:
-                print(province_name)
-            citys = tds[2].xpath("./a")
-            for city in citys:
-                name = city.xpath("./text()").get().strip()
-                url = city.xpath("./@href").get().strip()
-                #print("name: %s url: %s" % (name, url))
-                #https://hf.newhouse.fang.com/house/s/
-                #http://hf.fang.com/
-                suoxie = url.split('.')[0].split('/')[-1]
-                newhouse_url = "https://{}.newhouse.fang.com/house/s/".format(suoxie)
-                print("newhouse_url: ", newhouse_url)
-                #https://hf.esf.fang.com/
-                esf_url = "https://{}.esf.fang.com/".format(suoxie)
-
-                item = {"province_name":province_name,"city_name":name}
-
-                yield scrapy.Request(newhouse_url, callback=self.parse_newhouse, meta = item)
-
-                yield scrapy.Request(esf_url, callback=self.parse_esf)
-                break
-            break
-    '''
-    '''
-    def strip_list_space(self, l):
-        return l and l.strip()
-            
-    def parse_newhouse(self, response):
-        province_name, city = response.meta.get("info")
-        houses = response.xpath("//div[@class='nl_con clearfix']/ul/li") 
-        for house in houses:
-            item = NewHouseItem()
-            name = house.xpath(".//div[@class='nlc_details']/div[contains(@class,'house_value')]/div[@class='nlcd_name']/a/text()").get()
-            if name:
-                name = name.strip()
-                item["name"] = name
-            position = house.xpath(".//div[@class='nlc_details']/div[contains(@class,'relative_message')]/div[@class='address']/a/@title").get()
-            if position:
-                position = position.strip()
-                item["position"] = position
-            resource = house.xpath(".//div[@class='nlc_details']/div[contains(@class,'fangyuan')]//text()").getall()
-            if resource:
-                resource = list( filter(self.strip_list_space, resource) )
-                item["resource"] = resource
-            house_type = house.xpath(".//div[@class='nlc_details']/div[contains(@class,'house_type')]//text()").getall()
-            if house_type:
-                house_type = re.sub( r"\s","","".join(house_type) ).split("－")
-                print(house_type)
-                if len(house_type)>=2:
-                    item["house_type"] = house_type[0]
-                    item["house_area"] = house_type[1]
-                else:
-                    item["house_type"] = house_type[0]
-
-            house_price = house.xpath(".//div[@class='nlc_details']/div[contains(@class,'nhouse_price')]//text()").getall()
-            if house_price:
-                house_price = re.sub(r"\s","","".join(house_price)) 
-                item["house_price"] = house_price
-            yield item
-        #当请求到第6页页面上有两个符合匹配规则的下一页地址，此处使用最后一个
-        next_page = response.xpath("//a[@class='next']/@href").getall()
-        if next_page:
-            print("###################: netx_page: ", next_page)
-            yield scrapy.Request(urljoin(response.url, next_page[-1]), callback = self.parse_newhouse)
-    '''
     def parse_esf(self, response):
-        #print(">>>>>>>>>>>>>>: ", response.status)
-        pass
+        province_name, city_name = response.meta.get("info")
+        dls = response.xpath("//div[contains(@class, 'shop_list')]/dl")
+        for dl in dls:
+            name = dl.xpath(".//p[@class='add_shop']/a/@title").get()
+            if name:
+                print(name)
+            price = dl.xpath(".//dd[@class='price_right']/span[1]//text()").getall()
+            if price:
+                price = "".join(price)
+            unit_price = dl.xpath(".//dd[@class='price_right']/span[2]//text()").get()
+            #print(unit_price)
+            origin_url = dl.xpath(".//h4[@class='clearfix']/a/@href").get()
+            origin_url = response.urljoin(origin_url)
+            #print(origin_url)
+            house_info = dl.xpath(".//p[@class='tel_shop']//text()").getall()
+            try:
+                if house_info:
+                    house_info = "".join(house_info)
+                    house_infos = re.sub(r"\s","", house_info).split("|")[:-1]
+                    print(house_infos)
+                    toward = ""
+                    rooms= ""
+                    floor =""
+                    year = ""
+                    area = ""
+                    for info in house_infos:
+                        if "厅" in info:
+                            rooms = info
+                        elif "向" in info:
+                            toward = info
+                        elif "层" in info:
+                            floor = info
+                        elif "年" in info:
+                            year = info
+                        else:
+                            area = info
+                contacts = dl.xpath(".//p[@class='tel_shop']/span[@class='people_name']/a/text()").get()
+                contacts_url = dl.xpath(".//p[@class='tel_shop']/span[@class='people_name']/a/@href").get()
+                contacts_url = response.urljoin(contacts_url)
+                print(contacts_url)
+                item = ESFHouseItem(province_name=province_name, city=city_name, price=price, rooms=rooms,floor=floor,origin_url=origin_url,area=area,toward=toward,unit_price=unit_price,year=year,contacts_url=contacts_url, contacts=contacts, house_style="esf")
+                yield item
+            except Exception as e:
+                print(">>>>>>>>>>>>: ",e)
+            
