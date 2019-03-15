@@ -28,4 +28,13 @@ class NewHouseItem(scrapy.Item):
     sale = scrapy.Field()
     #详情页面url
     origin_url = scrapy.Field()
-    
+class ESFHouseItem(scrapy.Item):
+	province =scrapy.Item()
+	city =scrapy.Item()
+	name =scrapy.Item()
+	price =scrapy.Item()
+	rooms =scrapy.Item()
+	floor =scrapy.Item()
+	origin_url =scrapy.Item()
+	district =scrapy.Item()
+	area = scrapy.Field()
